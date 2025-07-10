@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/lib/auth";
-import { Lock, User, Loader2, AlertCircle, ArrowRight } from "lucide-react";
+import { Lock, User, Loader2, AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 
@@ -27,6 +27,7 @@ export default function Login() {
     username: "",
     password: ""
   });
+  const [showPassword, setShowPassword] = useState(false);
 
   // Redirect if already authenticated
   if (isAuthenticated) {
@@ -117,14 +118,30 @@ export default function Login() {
                 <Input
                   id="password"
                   name="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={formData.password}
                   onChange={handleChange}
                   disabled={isLoading}
-                  className="pl-10"
+                  className="pl-10 pr-10"
                   autoComplete="current-password"
                 />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span className="sr-only">
+                    {showPassword ? "Hide password" : "Show password"}
+                  </span>
+                </Button>
               </div>
             </div>
           </CardContent>
