@@ -11,7 +11,8 @@ import {
   Trash2,
   MoreHorizontal,
   Link2,
-  Search
+  Search,
+  RefreshCw
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -62,6 +63,7 @@ interface CrawlResultsTableProps {
   totalCount: number;
   searchQuery?: string;
   setSearchQuery?: (query: string) => void;
+  onRefresh?: () => void; // Add refresh callback
 }
 
 export function CrawlResultsTable({
@@ -81,9 +83,11 @@ export function CrawlResultsTable({
   totalCount,
   searchQuery = '',
   setSearchQuery,
+  onRefresh,
 }: CrawlResultsTableProps) {
   const navigate = useNavigate();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -253,19 +257,49 @@ export function CrawlResultsTable({
   return (
     <Card>
       <CardContent className="p-0">
-        {setSearchQuery && (
-          <div className="p-4 border-b">
-            <div className="relative max-w-sm">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search URLs or titles..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
+        <div className="p-4 border-b">
+          <div className="flex justify-between items-center">
+            {setSearchQuery && (
+              <div className="relative max-w-sm">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search URLs or titles..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (onRefresh) {
+                  setIsRefreshing(true);
+                  try {
+                    onRefresh();
+                  } finally {
+                    setTimeout(() => setIsRefreshing(false), 500);
+                  }
+                }
+              }}
+              disabled={isRefreshing}
+              className="gap-2 h-9"
+            >
+              {isRefreshing ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Refreshing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh
+                </>
+              )}
+            </Button>
           </div>
-        )}
+        </div>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>

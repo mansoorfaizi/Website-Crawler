@@ -1,12 +1,12 @@
-# Website Analyzer
+#Website Crawler
 
 A professional web application for analyzing websites and providing detailed insights about their structure, links, and HTML elements.
 
-## 🚀 Overview
+## Overview
 
 Website Analyzer is a full-stack application that crawls websites and provides comprehensive analysis including HTML version detection, link analysis (internal/external/broken), heading structure evaluation, and more. The application features a modern React frontend with a Go backend, connected to a MySQL database.
 
-## ✨ Features
+## Features
 
 - **Website Analysis**
   - HTML version detection
@@ -26,7 +26,7 @@ Website Analyzer is a full-stack application that crawls websites and provides c
   - Secure authentication with JWT
   - Protected routes and API endpoints
 
-## 🏗️ Architecture
+## Architecture
 
 ### Frontend
 - **Framework**: React with TypeScript
@@ -47,7 +47,7 @@ Website Analyzer is a full-stack application that crawls websites and provides c
 - Go (v1.18+)
 - MySQL (v8.0+)
 
-## 🛠️ Installation
+## Installation
 
 ### Backend Setup
 
@@ -84,7 +84,7 @@ Website Analyzer is a full-stack application that crawls websites and provides c
    ```
    The application will be available at http://localhost:3000
 
-## 📊 Usage
+## Usage
 
 1. **Login**: Access the application using the default credentials:
    - Username: `admin`
@@ -102,7 +102,7 @@ Website Analyzer is a full-stack application that crawls websites and provides c
    - Delete websites you no longer need
    - Use bulk actions to manage multiple websites at once
 
-## 🔄 API Endpoints
+## API Endpoints
 
 ### Authentication
 - `POST /api/auth/login` - Authenticate user and receive JWT token
@@ -114,19 +114,19 @@ Website Analyzer is a full-stack application that crawls websites and provides c
 - `POST /api/websites/:id/analyze` - Start analysis for a website
 - `DELETE /api/websites/:id` - Delete a website
 
-## 🔒 Security
+## Security
 
 - JWT-based authentication
 - Protected API endpoints
 - Secure password handling
 
-## 📱 Responsive Design
+## Responsive Design
 
 The application is fully responsive and works on:
 - Desktop computers
 - Tablets
 - Mobile devices
 
-## 📄 License
+## License
 
 [MIT License](LICENSE)

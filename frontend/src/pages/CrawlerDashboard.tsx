@@ -351,25 +351,6 @@ export function CrawlerDashboard() {
                 Logout
             </Button>
             <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => fetchData(false)}
-              disabled={isRefreshing}
-              className="gap-2 h-9"
-            >
-              {isRefreshing ? (
-                <>
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  Refreshing...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4" />
-                  Refresh
-                </>
-              )}
-            </Button>
-            <Button 
               onClick={() => setShowAddDialog(true)} 
               className="gap-2 h-9"
               disabled={isAddingUrl}
@@ -506,6 +487,7 @@ export function CrawlerDashboard() {
               setPage={setPage}
               pageSize={pageSize}
               totalCount={getTabCount('all')}
+              onRefresh={() => fetchData(false)}
             />
           </TabsContent>
           
@@ -562,6 +544,7 @@ export function CrawlerDashboard() {
               setPage={setPage}
               pageSize={pageSize}
               totalCount={getTabCount('completed')}
+              onRefresh={() => fetchData(false)}
             />
           </TabsContent>
           
@@ -612,6 +595,7 @@ export function CrawlerDashboard() {
               setPage={setPage}
               pageSize={pageSize}
               totalCount={getTabCount('running')}
+              onRefresh={() => fetchData(false)}
             />
           </TabsContent>
           
@@ -662,6 +646,7 @@ export function CrawlerDashboard() {
               setPage={setPage}
               pageSize={pageSize}
               totalCount={getTabCount('queued')}
+              onRefresh={() => fetchData(false)}
             />
           </TabsContent>
           
@@ -718,6 +703,7 @@ export function CrawlerDashboard() {
               setPage={setPage}
               pageSize={pageSize}
               totalCount={getTabCount('error')}
+              onRefresh={() => fetchData(false)}
             />
           </TabsContent>
         </Tabs>
