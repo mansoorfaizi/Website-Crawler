@@ -1,9 +1,12 @@
 import axios from 'axios';
 import { CrawlResult, CrawlDetails } from '@/types/crawler';
 
+// Get API URL from environment variable or fallback to localhost
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+
 // Create axios instance with base URL
 const api = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },

@@ -74,7 +74,7 @@ Website Analyzer is a full-stack application that crawls websites and provides c
 
 1. Install dependencies:
    ```bash
-   cd frontend1
+   cd frontend
    npm install
    ```
 

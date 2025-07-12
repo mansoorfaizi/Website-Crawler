@@ -25,9 +25,9 @@ The Website Analyzer frontend is a modern React application that provides a user
 - **TypeScript**: Type-safe JavaScript
 - **React Router**: Client-side routing
 - **shadcn/ui**: UI component library
+- **Tailwind CSS**: Utility-first CSS framework
 - **Lucide React**: Icon library
 - **Axios**: HTTP client for API requests
-- **React Query**: Data fetching and caching
 
 ## Project Structure
 
