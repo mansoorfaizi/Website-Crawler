@@ -1,6 +1,6 @@
 #Website Crawler
 
-A professional web application for analyzing websites and providing detailed insights about their structure, links, and HTML elements.
+A web application for analyzing websites and providing detailed insights about their structure, links, and HTML elements.
 
 ## Overview
 
