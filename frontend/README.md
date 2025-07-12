@@ -1,6 +1,6 @@
 # Website Analyzer Frontend
 
-This document provides a detailed explanation of the Website Analyzer frontend architecture, components, and functionality.
+A detailed breakdown of how I built the frontend for the Website Analyzer project - documenting key decisions, component structure, and the overall architecture.
 
 ## Table of Contents
 
@@ -17,38 +17,41 @@ This document provides a detailed explanation of the Website Analyzer frontend a
 
 ## Overview
 
-The Website Analyzer frontend is a modern React application that provides a user interface for analyzing websites. It allows users to submit URLs, view analysis results, and manage their analyzed websites. The application features a responsive design, authentication system, and real-time updates for ongoing analyses.
+I built this frontend as a modern React app that gives users a clean interface for the website analysis tool. The main goals were to create a responsive design that works well on all devices, implement a reliable authentication flow, and provide real-time updates during ongoing analyses. The dashboard-centered UI makes it easy to manage multiple website analyses at once.
 
 ## Tech Stack
 
-- **React**: UI library
-- **TypeScript**: Type-safe JavaScript
-- **React Router**: Client-side routing
-- **shadcn/ui**: UI component library
-- **Tailwind CSS**: Utility-first CSS framework
-- **Lucide React**: Icon library
-- **Axios**: HTTP client for API requests
+- **React**: For building the component-based UI
+- **TypeScript**: Added for type safety and better IDE support
+- **Vite**: Chose this over CRA for faster builds and hot module replacement
+- **React Router**: Handles navigation with protected routes
+- **shadcn/ui**: Used as a base for custom components (saved tons of time)
+- **Tailwind CSS**: For utility-first styling that's easy to customize
+- **Lucide React**: Lightweight icon library with consistent design
+- **Axios**: For API requests with interceptors for auth
 
 ## Project Structure
+
+I organized the project with a focus on separation of concerns:
 
 ```
 frontend/
 ├── src/
-│   ├── components/        # Reusable UI components
-│   ├── lib/               # Utilities and services
-│   │   ├── api.ts         # API service
-│   │   └── auth.tsx       # Authentication context
-│   ├── pages/             # Page components
-│   │   ├── CrawlDetails.tsx       # Website analysis details page
-│   │   ├── CrawlerDashboard.tsx   # Main dashboard page
-│   │   ├── CrawlResultsTable.tsx  # Table for displaying analysis results
-│   │   ├── Login.tsx              # Login page
-│   │   ├── Register.tsx           # Registration page
-│   │   └── NotFound.tsx           # 404 page
-│   ├── types/             # TypeScript type definitions
-│   │   └── crawler.ts     # Types for crawler data
-│   ├── App.tsx            # Main application component
-│   ├── main.tsx           # Application entry point
+│   ├── components/        # Reusable UI building blocks
+│   ├── lib/               # Core utilities and services
+│   │   ├── api.ts         # API client with typed responses
+│   │   └── auth.tsx       # Auth context + token management
+│   ├── pages/             # Route-level components
+│   │   ├── CrawlDetails.tsx       # Single website analysis view
+│   │   ├── CrawlerDashboard.tsx   # Main dashboard
+│   │   ├── CrawlResultsTable.tsx  # Sortable/filterable results
+│   │   ├── Login.tsx              # Authentication
+│   │   ├── Register.tsx           # User registration
+│   │   └── NotFound.tsx           # 404 handler
+│   ├── types/             # Shared type definitions
+│   │   └── crawler.ts     # Analysis data models
+│   ├── App.tsx            # Routes and layout wrapper
+│   ├── main.tsx           # Entry point
 │   └── index.css          # Global styles
 ```
 
@@ -56,32 +59,40 @@ frontend/
 
 ### CrawlerDashboard
 
-The `CrawlerDashboard` component is the main interface where users can view and manage their analyzed websites. It features:
+The dashboard is the heart of the app - I designed it to give users a quick overview of all their analyzed websites. Key features include:
 
-- Status cards showing counts of websites in different states
-- Tabs for filtering websites by status (all, completed, running, queued, error)
-- A table displaying website analysis results
-- Actions for adding new URLs, rerunning analyses, and deleting websites
-- Search functionality for finding specific websites
+- Status cards with real counts that update in real-time
+- Tab-based filtering that's fast (no server roundtrips for filtering)
+- Powerful table with sorting, searching and bulk actions
+- Built-in polling that only activates when sites are being processed
+
+A code snippet showing how I handled the polling logic:
 
 ```tsx
-// Key state in CrawlerDashboard
-const [results, setResults] = useState<CrawlResult[]>([]);
-const [isLoading, setIsLoading] = useState(false);
-const [activeTab, setActiveTab] = useState('all');
+useEffect(() => {
+  fetchData();
+  
+  // Only poll if we have active jobs
+  const interval = setInterval(() => {
+    if (results.some(r => r.status === 'running' || r.status === 'queued')) {
+      fetchData(false); // silent refresh
+    }
+  }, 10000);
+  
+  return () => clearInterval(interval);
+}, [page, pageSize, isAuthenticated]);
 ```
-
-The dashboard uses a single `CrawlResultsTable` component that updates based on the selected tab, improving performance by avoiding duplicate component instances.
 
 ### CrawlResultsTable
 
-The `CrawlResultsTable` component displays website analysis results in a tabular format. It handles:
+This table component was challenging to build because it needed to handle:
 
-- Sorting by different columns
-- Selection of multiple items for bulk actions
-- Pagination
-- Row actions (rerun analysis, delete)
-- Search filtering
+- Column sorting that maintains state when changing tabs
+- Bulk selection that works across pages
+- Responsive design that collapses on mobile
+- Row click navigation that doesn't interfere with action buttons
+
+The component takes many props but I kept the internal logic clean:
 
 ```tsx
 interface CrawlResultsTableProps {
@@ -107,16 +118,15 @@ interface CrawlResultsTableProps {
 
 ### CrawlDetails
 
-The `CrawlDetails` component displays detailed information about a specific website analysis, including:
+The details view displays all the information gathered during analysis. I used a tabbed interface to organize the data into logical sections:
 
-- Website metadata (title, URL, HTML version)
-- Heading structure analysis
-- Link analysis (internal, external, broken links)
-- Login form detection
-- Status information
+- Overview tab shows the general website info and metadata
+- Links tab provides breakdowns of internal/external connections
+- Issues tab (conditionally shown) highlights problems like broken links
+
+This approach keeps the UI clean while still showing all the data:
 
 ```tsx
-// Tabs in CrawlDetails
 <Tabs defaultValue="overview" className="space-y-4">
   <TabsList>
     <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -127,55 +137,47 @@ The `CrawlDetails` component displays detailed information about a specific webs
   </TabsList>
   
   <TabsContent value="overview">
-    {/* Overview content */}
+    {/* Site metadata, HTML version, heading structure */}
   </TabsContent>
   
   <TabsContent value="links">
-    {/* Links content */}
+    {/* Link analysis with charts and tables */}
   </TabsContent>
   
   <TabsContent value="issues">
-    {/* Broken links content */}
+    {/* Broken links with status codes and suggestions */}
   </TabsContent>
 </Tabs>
 ```
 
-### Authentication Components
-
-The `Login` and `Register` components handle user authentication:
-
-- Form validation
-- Error handling
-- Password visibility toggle
-- Redirection after successful authentication
-
 ## Data Flow
 
-1. **User Authentication**:
-   - User logs in or registers
-   - Authentication token is stored in localStorage
-   - Auth context provides authentication state to the application
+The app follows a clear data flow pattern that I designed to be predictable:
 
-2. **Dashboard Data Loading**:
-   - `CrawlerDashboard` fetches website data on mount
-   - Data is filtered and sorted based on user selection
-   - Periodic polling updates data for websites in running/queued state
+1. **Auth Flow**:
+   - User logs in → JWT stored in localStorage
+   - Auth context provides global access to auth state
+   - API requests automatically include the token
 
-3. **Website Analysis**:
-   - User submits a URL via `AddUrlDialog`
-   - URL is sent to the backend and saved with "queued" status
-   - User initiates analysis, which updates status to "running"
-   - Dashboard polls for updates until analysis is complete
-   - Results are displayed in the table and can be viewed in detail
+2. **Dashboard Loading**:
+   - On mount, data is fetched with loading states
+   - User interactions (sorting, filtering, etc.) update local state
+   - Smart polling checks for updates to running analyses
+
+3. **Analysis Process**:
+   - User adds URL → saved as "queued"
+   - Analysis starts → status updates to "running" 
+   - Polling updates the status until completion
+   - Results appear in the table when done
 
 4. **Detail View**:
-   - User clicks on a row to view details
-   - `CrawlDetails` fetches detailed information about the website
-   - Data is displayed in tabs for different aspects of the analysis
+   - When user clicks a row → fetch detailed data
+   - Different tabs show focused subsets of the data
+   - Actions like re-running analysis update the parent state
 
 ## Type System
 
-The application uses TypeScript for type safety. Key types are defined in `types/crawler.ts`:
+I took advantage of TypeScript to create a solid type foundation. The core types in `types/crawler.ts` define our data model:
 
 ```typescript
 export interface CrawlResult {
@@ -200,26 +202,18 @@ export interface CrawlResult {
   completedAt?: string;
   errorMessage?: string;
 }
+```
 
-export interface BrokenLink {
-  url: string;
-  statusCode: number;
-  statusText: string;
-}
+I created some utility types for operations like sorting:
 
-export interface CrawlDetails extends CrawlResult {
-  brokenLinks: BrokenLink[];
-}
-
+```typescript
 export type SortField = keyof Pick<CrawlResult, 'title' | 'url' | 'internalLinks' | 'externalLinks' | 'createdAt' | 'status'>;
 export type SortDirection = 'asc' | 'desc';
 ```
 
-Component-specific types are defined within their respective files, while shared types are centralized in the types directory.
-
 ## Authentication
 
-Authentication is handled by the `auth.tsx` context provider:
+Auth is handled through a custom context provider that manages the token and user state:
 
 ```typescript
 interface AuthContextType {
@@ -232,15 +226,15 @@ interface AuthContextType {
 }
 ```
 
-The auth context:
-- Manages user authentication state
-- Provides login, register, and logout functions
-- Stores and retrieves the authentication token from localStorage
-- Makes authenticated API requests through the API service
+The context handles:
+- Login/logout flows with proper token storage
+- Registration for new users (admin only)
+- Loading states during auth operations
+- Token validation and refresh
 
 ## API Integration
 
-The `api.ts` file contains services for interacting with the backend API:
+The API service handles all communication with the backend. I structured it to map backend data formats to our frontend types automatically:
 
 ```typescript
 export const websiteAPI = {
@@ -255,73 +249,53 @@ export const websiteAPI = {
     };
   },
   
-  getWebsite: async (id: string): Promise<CrawlDetails> => {
-    const response = await api.get(`/websites/${id}`);
-    const result = mapWebsiteToResult(response.data);
-    
-    // Map broken links
-    const brokenLinks = (response.data.broken_links || []).map((link: any) => ({
-      url: link.url,
-      statusCode: link.status_code,
-      statusText: getStatusText(link.status_code),
-    }));
-    
-    return {
-      ...result,
-      brokenLinks,
-    };
+  // Other methods...
+  
+  // Recently added bulk operations for better performance
+  bulkDeleteWebsites: async (ids: string[]): Promise<void> => {
+    const intIds = ids.map(id => parseInt(id, 10));
+    await api.post('/websites/bulk-delete', { ids: intIds });
   },
   
-  createWebsite: async (url: string): Promise<CrawlResult> => {
-    const response = await api.post('/websites', { url });
-    return mapWebsiteToResult(response.data);
-  },
-  
-  startAnalysis: async (id: string): Promise<void> => {
-    await api.post(`/websites/${id}/start`);
-  },
-  
-  deleteWebsite: async (id: string): Promise<void> => {
-    await api.delete(`/websites/${id}`);
+  bulkStartAnalysis: async (ids: string[]): Promise<void> => {
+    const intIds = ids.map(id => parseInt(id, 10));
+    await api.post('/websites/bulk-start', { ids: intIds });
   },
 };
 ```
 
-The API service:
-- Maps backend data to frontend types
-- Handles authentication headers
-- Provides methods for all API operations
+This design provides:
+- Consistent data transformation
+- Proper error handling
+- Type safety for all API responses
+- Support for both individual and bulk operations
 
 ## UI Components
 
-The application uses the shadcn/ui component library, which provides:
+For the UI, I started with shadcn/ui components and customized them to fit our needs:
 
-- Consistent styling and theming
-- Accessible components
-- Responsive design
+- Cards for stats and content containers
+- Tables with custom sorting and selection
+- Forms with validation and error handling
+- Modals and dialogs for user interactions
+- Status indicators that are color-coded by state
 
-Key UI components include:
-- `Card` for content containers
-- `Table` for data display
-- `Tabs` for organizing content
-- `Button` for actions
-- `Dialog` for modals
-- `Form` components for user input
+The system maintains visual consistency while being adaptable to different screen sizes.
 
 ## Getting Started
 
-To run the frontend locally:
+If you want to run the frontend locally:
 
-1. Clone the repository
+1. Clone the repo
 2. Install dependencies:
    ```
    cd frontend
    npm install
    ```
-3. Start the development server:
+3. Start the dev server:
    ```
    npm run dev
    ```
-4. The application will be available at http://localhost:3000
+4. Open http://localhost:3000 in your browser
 
-Make sure the backend server is running on http://localhost:8080 for API requests to work correctly.
+Make sure you have the backend running at http://localhost:8080 first, or modify the `VITE_API_URL` in your `.env` file to point to your API.

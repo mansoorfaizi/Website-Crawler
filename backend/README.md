@@ -1,6 +1,6 @@
 # Website Analyzer Backend
 
-This document provides a detailed explanation of how the Website Analyzer backend processes, analyzes, and stores website data.
+A breakdown of how I built the Go backend for the Website Analyzer tool - focusing on the crawler implementation, database design, and API architecture.
 
 ## Table of Contents
 
@@ -12,24 +12,30 @@ This document provides a detailed explanation of how the Website Analyzer backen
 
 ## System Overview
 
-The Website Analyzer backend is built using Go with the Gin web framework. It provides a RESTful API for analyzing websites and extracting key information such as HTML version, heading structure, links, and more. The system uses a MySQL database for data persistence.
+I built this backend using Go with Gin because I needed something that could handle concurrent website crawling efficiently. Go's goroutines are perfect for this since they let me process multiple websites simultaneously without using too many system resources. The REST API connects to a MySQL database which stores all the analysis results and user data.
+
+Key components:
+- **API layer** - Handles HTTP requests and authentication (using JWT)
+- **Crawler service** - Does the actual website analysis 
+- **Data models** - Manages database interactions
+- **Middleware** - Handles auth, rate limiting, etc.
 
 ## Database Schema
 
-The database consists of the following tables:
+The database uses a relational schema with foreign keys to maintain data integrity:
 
 ```sql
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL, -- Stored with bcrypt hashing
     email VARCHAR(100) UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Websites table
+-- Websites table - main table for storing analysis requests
 CREATE TABLE IF NOT EXISTS websites (
     id INT AUTO_INCREMENT PRIMARY KEY,
     url VARCHAR(2048) NOT NULL,
@@ -41,11 +47,11 @@ CREATE TABLE IF NOT EXISTS websites (
     status ENUM('queued', 'running', 'done', 'error') DEFAULT 'queued',
     error_message TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_url (url(255)),
-    INDEX idx_status (status)
+    INDEX idx_url (url(255)), -- Added index for faster URL lookups
+    INDEX idx_status (status) -- Added index for status filtering
 );
 
--- HeadingCounts table
+-- HeadingCounts table - stores h1-h6 counts for SEO analysis
 CREATE TABLE IF NOT EXISTS heading_counts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     website_id INT NOT NULL,
@@ -58,7 +64,7 @@ CREATE TABLE IF NOT EXISTS heading_counts (
     FOREIGN KEY (website_id) REFERENCES websites(id) ON DELETE CASCADE
 );
 
--- LinkCounts table
+-- LinkCounts table - stores link metrics
 CREATE TABLE IF NOT EXISTS link_counts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     website_id INT NOT NULL,
@@ -68,7 +74,7 @@ CREATE TABLE IF NOT EXISTS link_counts (
     FOREIGN KEY (website_id) REFERENCES websites(id) ON DELETE CASCADE
 );
 
--- BrokenLinks table
+-- BrokenLinks table - stores details about each broken link
 CREATE TABLE IF NOT EXISTS broken_links (
     id INT AUTO_INCREMENT PRIMARY KEY,
     website_id INT NOT NULL,
@@ -79,56 +85,26 @@ CREATE TABLE IF NOT EXISTS broken_links (
 );
 ```
 
+I've kept things normalized to make querying efficient, but used joined queries when fetching data to minimize round trips to the database.
+
 ## Website Processing Flow
+
+Here's how a website goes from submission to analysis:
 
 ### 1. URL Submission
 
-When a user submits a URL for analysis, the following process occurs:
-
-```go
-// CreateWebsite creates a new website to analyze
-func CreateWebsite(c *gin.Context) {
-    var website models.Website
-
-    // Bind the request body to the website struct
-    if err := c.ShouldBindJSON(&website); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-        return
-    }
-
-    // Get the user ID from the context (set by the AuthMiddleware)
-    userID, exists := c.Get("userID")
-    if !exists {
-        c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-        return
-    }
-    website.UserID = userID.(int)
-
-    // Create the website
-    createdWebsite, err := models.CreateWebsite(&website)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
-
-    // Return the created website
-    c.JSON(http.StatusCreated, createdWebsite)
-}
-```
-
-The URL is saved to the database with an initial status of "queued":
+When someone adds a new URL, we don't analyze it right away. Instead, we store it with a "queued" status:
 
 ```go
 // CreateWebsite creates a new website record in the database
 func CreateWebsite(website *Website) (*Website, error) {
-    // Start a transaction
     tx, err := database.DB.Begin()
     if err != nil {
         return nil, err
     }
     defer tx.Rollback()
 
-    // Insert the website
+    // Insert with "queued" status - analysis happens later
     result, err := tx.Exec(
         "INSERT INTO websites (url, user_id, status) VALUES (?, ?, ?)",
         website.URL, website.UserID, "queued",
@@ -137,88 +113,60 @@ func CreateWebsite(website *Website) (*Website, error) {
         return nil, err
     }
 
-    // Get the ID of the newly created website
-    id, err := result.LastInsertId()
-    if err != nil {
-        return nil, err
-    }
+    // Get the new ID and set up the response object
+    id, _ := result.LastInsertId()
     website.ID = int(id)
     website.Status = "queued"
     website.CreatedAt = time.Now()
     website.UpdatedAt = time.Now()
 
-    // Commit the transaction
-    if err := tx.Commit(); err != nil {
-        return nil, err
-    }
-
+    tx.Commit()
     return website, nil
 }
 ```
 
+This approach lets users queue up multiple websites without waiting for analysis.
+
 ### 2. Starting the Analysis
 
-When the user initiates the analysis, the `StartAnalysis` endpoint is called:
+The analysis only starts when explicitly requested. I used goroutines to handle this asynchronously:
 
 ```go
-// StartAnalysis starts the analysis of a website
+// StartAnalysis kicks off the website crawling process
 func StartAnalysis(c *gin.Context) {
-    // Get the website ID from the URL parameter
-    id, err := strconv.Atoi(c.Param("id"))
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid website ID"})
-        return
-    }
-
-    // Get the user ID from the context (set by the AuthMiddleware)
-    userID, exists := c.Get("userID")
-    if !exists {
-        c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-        return
-    }
-
-    // Get the website from the database
+    id, _ := strconv.Atoi(c.Param("id"))
+    userID := c.Get("userID").(int)
+    
+    // Get the website info
     website, err := models.GetWebsiteByID(id)
     if err != nil {
         c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
         return
     }
-
-    // Check if the website belongs to the authenticated user
-    if website.UserID != userID.(int) {
+    
+    // Security check - users can only analyze their own websites
+    if website.UserID != userID {
         c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to access this website"})
         return
     }
-
-    // Check if the website is already being analyzed
+    
+    // Don't restart analysis that's already running
     if website.Status == "running" {
         c.JSON(http.StatusConflict, gin.H{"error": "Website is already being analyzed"})
         return
     }
-
-    // Create a crawler for the website
-    crawler, err := services.NewCrawler(website)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
-
-    // Start the analysis in a separate goroutine
+    
+    // Create a crawler and run it in the background
+    crawler, _ := services.NewCrawler(website)
     go func() {
         err := crawler.Crawl()
         if err != nil {
             models.UpdateWebsiteStatus(website.ID, "error", err.Error())
         }
     }()
-
-    // Update the website status to running
-    err = models.UpdateWebsiteStatus(website.ID, "running", "")
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
-
-    // Return the website status
+    
+    // Update status and return immediately (don't wait for completion)
+    models.UpdateWebsiteStatus(website.ID, "running", "")
     c.JSON(http.StatusOK, gin.H{
         "status": "running",
         "message": "Website analysis started",
@@ -226,203 +174,82 @@ func StartAnalysis(c *gin.Context) {
 }
 ```
 
-The analysis is performed asynchronously in a separate goroutine to prevent blocking the API response.
+The frontend polls for status updates while analysis is running.
 
-### 3. Website Analysis Process
+### 3. Bulk Operations
 
-The actual analysis is performed by the `Crawler` service:
+I recently added bulk operations to improve efficiency when working with multiple websites:
 
 ```go
-// Crawl crawls the website and collects data
-func (c *Crawler) Crawl() error {
-    // Update status to running
-    err := models.UpdateWebsiteStatus(c.website.ID, "running", "")
-    if err != nil {
-        return err
+// BulkStartAnalysis starts analysis for multiple websites at once
+func BulkStartAnalysis(c *gin.Context) {
+    var request struct {
+        IDs []int `json:"ids" binding:"required"`
     }
-
-    // Get the HTML content
-    resp, err := c.httpClient.Get(c.website.URL)
-    if err != nil {
-        errMsg := fmt.Sprintf("Failed to fetch URL: %v", err)
-        models.UpdateWebsiteStatus(c.website.ID, "error", errMsg)
-        return err
-    }
-    defer resp.Body.Close()
-
-    // Check if the response is successful
-    if resp.StatusCode != http.StatusOK {
-        errMsg := fmt.Sprintf("HTTP status code: %d", resp.StatusCode)
-        models.UpdateWebsiteStatus(c.website.ID, "error", errMsg)
-        return fmt.Errorf(errMsg)
-    }
-
-    // Read the HTML content
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        errMsg := fmt.Sprintf("Failed to read response body: %v", err)
-        models.UpdateWebsiteStatus(c.website.ID, "error", errMsg)
-        return err
-    }
-    htmlContent := string(body)
-
-    // Parse the HTML
-    doc, err := html.Parse(strings.NewReader(htmlContent))
-    if err != nil {
-        errMsg := fmt.Sprintf("Failed to parse HTML: %v", err)
-        models.UpdateWebsiteStatus(c.website.ID, "error", errMsg)
-        return err
-    }
-
-    // Initialize data structures
-    c.website.HeadingCounts = &models.HeadingCounts{WebsiteID: c.website.ID}
-    c.website.LinkCounts = &models.LinkCounts{WebsiteID: c.website.ID}
-    c.website.BrokenLinks = []models.BrokenLink{}
-
-    // Extract information
-    htmlVersion := c.detectHTMLVersion(htmlContent)
-    c.website.HTMLVersionStr = htmlVersion
+    c.ShouldBindJSON(&request)
     
-    title := c.extractTitle(doc)
-    c.website.TitleStr = title
+    userID := c.Get("userID").(int)
     
-    c.extractHeadingCounts(doc)
-    c.extractLinks(doc)
-    
-    // Check for login form
-    c.website.LinkCounts.HasLoginForm = c.detectLoginForm(doc, htmlContent)
-
-    // Update status to done
-    c.website.Status = "done"
-    err = models.UpdateWebsiteData(c.website)
-    if err != nil {
-        errMsg := fmt.Sprintf("Failed to update website data: %v", err)
-        models.UpdateWebsiteStatus(c.website.ID, "error", errMsg)
-        return err
+    // Process each website in the list
+    for _, id := range request.IDs {
+        website, err := models.GetWebsiteByID(id)
+        if err != nil || website.UserID != userID || website.Status == "running" {
+            continue // Skip invalid entries
+        }
+        
+        // Start each analysis in a separate goroutine
+        crawler, _ := services.NewCrawler(website)
+        go func() {
+            err := crawler.Crawl()
+            if err != nil {
+                models.UpdateWebsiteStatus(website.ID, "error", err.Error())
+            }
+        }()
+        
+        models.UpdateWebsiteStatus(website.ID, "running", "")
     }
-
-    return nil
+    
+    c.JSON(http.StatusOK, gin.H{
+        "message": "Websites analysis started",
+    })
 }
 ```
+
+This makes the UI much more responsive when working with multiple sites.
 
 ## Website Analysis
 
-The analysis extracts several pieces of information from the website:
+The crawler is where the real work happens. Here's how it analyzes a website:
 
-### 1. HTML Version Detection
+1. Fetches the HTML content using Go's `http` package
+2. Parses the HTML using the `golang.org/x/net/html` parser
+3. Extracts key information:
+   - HTML version from the doctype
+   - Page title from the title tag
+   - Headings (h1-h6) and their counts
+   - Internal and external links
+   - Checks for login forms
+   - Validates links to find broken ones
 
-```go
-// detectHTMLVersion detects the HTML version of the document
-func (c *Crawler) detectHTMLVersion(htmlContent string) string {
-    // Check for HTML5
-    if matches := htmlVersionRegex.FindStringSubmatch(htmlContent); len(matches) > 0 {
-        doctype := matches[0]
-        if strings.Contains(doctype, "HTML 4.01") {
-            return "HTML 4.01"
-        } else if strings.Contains(doctype, "XHTML 1.0") {
-            return "XHTML 1.0"
-        } else if strings.Contains(doctype, "XHTML 1.1") {
-            return "XHTML 1.1"
-        } else if strings.Contains(doctype, "html") && !strings.Contains(doctype, "DTD") {
-            return "HTML5"
-        }
-    }
-
-    // Default to unknown
-    return "Unknown"
-}
-```
-
-### 2. Title Extraction
+The link checking is the most complex part. I implemented it using concurrency with worker limits to avoid overwhelming the target server:
 
 ```go
-// extractTitle extracts the title of the document
-func (c *Crawler) extractTitle(doc *html.Node) string {
-    var title string
-    var extractTitleFunc func(*html.Node)
-    extractTitleFunc = func(n *html.Node) {
-        if n.Type == html.ElementNode && n.Data == "title" {
-            for child := n.FirstChild; child != nil; child = child.NextSibling {
-                if child.Type == html.TextNode {
-                    title = child.Data
-                    return
-                }
-            }
-        }
-        for child := n.FirstChild; child != nil; child = child.NextSibling {
-            extractTitleFunc(child)
-        }
-    }
-    extractTitleFunc(doc)
-    return title
-}
-```
-
-### 3. Heading Count Analysis
-
-```go
-// extractHeadingCounts counts the number of heading tags by level
-func (c *Crawler) extractHeadingCounts(doc *html.Node) {
-    var countHeadingsFunc func(*html.Node)
-    countHeadingsFunc = func(n *html.Node) {
-        if n.Type == html.ElementNode {
-            switch n.Data {
-            case "h1":
-                c.website.HeadingCounts.H1Count++
-            case "h2":
-                c.website.HeadingCounts.H2Count++
-            case "h3":
-                c.website.HeadingCounts.H3Count++
-            case "h4":
-                c.website.HeadingCounts.H4Count++
-            case "h5":
-                c.website.HeadingCounts.H5Count++
-            case "h6":
-                c.website.HeadingCounts.H6Count++
-            }
-        }
-        for child := n.FirstChild; child != nil; child = child.NextSibling {
-            countHeadingsFunc(child)
-        }
-    }
-    countHeadingsFunc(doc)
-}
-```
-
-### 4. Link Analysis
-
-```go
-// extractLinks extracts and categorizes links in the document
 func (c *Crawler) extractLinks(doc *html.Node) {
     var links []string
-    var extractLinksFunc func(*html.Node)
-    extractLinksFunc = func(n *html.Node) {
-        if n.Type == html.ElementNode && n.Data == "a" {
-            for _, attr := range n.Attr {
-                if attr.Key == "href" {
-                    links = append(links, attr.Val)
-                    break
-                }
-            }
-        }
-        for child := n.FirstChild; child != nil; child = child.NextSibling {
-            extractLinksFunc(child)
-        }
-    }
-    extractLinksFunc(doc)
+    // Find all links in the document
+    extractLinksFunc(doc, &links)
 
-    // Process the links in batches to check accessibility
+    // Process links with limited concurrency
     var wg sync.WaitGroup
-    semaphore := make(chan struct{}, 10) // Limit concurrency
-
+    semaphore := make(chan struct{}, 10) // Max 10 concurrent requests
+    
     for _, link := range links {
-        // Parse the link
         parsedLink, err := c.resolveURL(link)
         if err != nil {
             continue
         }
-
-        // Check if the link is internal or external
+        
+        // Categorize as internal or external
         if c.isInternalLink(parsedLink) {
             c.mutex.Lock()
             c.website.LinkCounts.InternalLinks++
@@ -432,155 +259,58 @@ func (c *Crawler) extractLinks(doc *html.Node) {
             c.website.LinkCounts.ExternalLinks++
             c.mutex.Unlock()
         }
-
-        // Check if the link is accessible
+        
+        // Check link accessibility in a goroutine
         wg.Add(1)
         go func(url string) {
             defer wg.Done()
-            semaphore <- struct{}{} // Acquire token
-            defer func() { <-semaphore }() // Release token
-
+            semaphore <- struct{}{} // Acquire slot
+            defer func() { <-semaphore }() // Release slot
+            
             statusCode, err := c.checkLinkAccessibility(url)
             if err != nil || statusCode >= 400 {
                 c.mutex.Lock()
                 c.website.BrokenLinks = append(c.website.BrokenLinks, models.BrokenLink{
-                    WebsiteID:  c.website.ID,
-                    URL:        url,
+                    WebsiteID: c.website.ID,
+                    URL: url,
                     StatusCode: statusCode,
                 })
                 c.mutex.Unlock()
             }
         }(parsedLink.String())
     }
-
+    
     wg.Wait() // Wait for all link checks to complete
 }
 ```
 
-### 5. Login Form Detection
-
-```go
-// detectLoginForm detects if the page contains a login form
-func (c *Crawler) detectLoginForm(doc *html.Node, htmlContent string) bool {
-    // Check for login form based on text content
-    if loginFormRegex.MatchString(htmlContent) {
-        return true
-    }
-
-    // Check for input fields with type="password"
-    var hasPasswordField bool
-    var checkFormsFunc func(*html.Node)
-    checkFormsFunc = func(n *html.Node) {
-        if n.Type == html.ElementNode && n.Data == "input" {
-            var isPassword bool
-            for _, attr := range n.Attr {
-                if attr.Key == "type" && attr.Val == "password" {
-                    isPassword = true
-                    break
-                }
-            }
-            if isPassword {
-                hasPasswordField = true
-                return
-            }
-        }
-        for child := n.FirstChild; child != nil; child = child.NextSibling {
-            checkFormsFunc(child)
-        }
-    }
-    checkFormsFunc(doc)
-
-    return hasPasswordField
-}
-```
-
-### 6. Storing Analysis Results
-
-After the analysis is complete, the results are stored in the database:
-
-```go
-// UpdateWebsiteData updates the data of a website after analysis
-func UpdateWebsiteData(website *Website) error {
-    // Start a transaction
-    tx, err := database.DB.Begin()
-    if err != nil {
-        return err
-    }
-    defer tx.Rollback()
-
-    // Update the website
-    _, err = tx.Exec(
-        "UPDATE websites SET title = ?, html_version = ?, status = ?, updated_at = NOW() WHERE id = ?",
-        website.TitleStr, website.HTMLVersionStr, website.Status, website.ID,
-    )
-    if err != nil {
-        return err
-    }
-
-    // Update or insert the heading counts
-    if website.HeadingCounts != nil {
-        _, err = tx.Exec(
-            "INSERT INTO heading_counts (website_id, h1_count, h2_count, h3_count, h4_count, h5_count, h6_count) VALUES (?, ?, ?, ?, ?, ?, ?) "+
-                "ON DUPLICATE KEY UPDATE h1_count = VALUES(h1_count), h2_count = VALUES(h2_count), h3_count = VALUES(h3_count), "+
-                "h4_count = VALUES(h4_count), h5_count = VALUES(h5_count), h6_count = VALUES(h6_count)",
-            website.ID, website.HeadingCounts.H1Count, website.HeadingCounts.H2Count, website.HeadingCounts.H3Count,
-            website.HeadingCounts.H4Count, website.HeadingCounts.H5Count, website.HeadingCounts.H6Count,
-        )
-        if err != nil {
-            return err
-        }
-    }
-
-    // Update or insert the link counts
-    if website.LinkCounts != nil {
-        _, err = tx.Exec(
-            "INSERT INTO link_counts (website_id, internal_links, external_links, has_login_form) VALUES (?, ?, ?, ?) "+
-                "ON DUPLICATE KEY UPDATE internal_links = VALUES(internal_links), external_links = VALUES(external_links), has_login_form = VALUES(has_login_form)",
-            website.ID, website.LinkCounts.InternalLinks, website.LinkCounts.ExternalLinks, website.LinkCounts.HasLoginForm,
-        )
-        if err != nil {
-            return err
-        }
-    }
-
-    // Delete existing broken links and insert new ones
-    if len(website.BrokenLinks) > 0 {
-        _, err = tx.Exec("DELETE FROM broken_links WHERE website_id = ?", website.ID)
-        if err != nil {
-            return err
-        }
-
-        for _, link := range website.BrokenLinks {
-            _, err = tx.Exec(
-                "INSERT INTO broken_links (website_id, url, status_code) VALUES (?, ?, ?)",
-                website.ID, link.URL, link.StatusCode,
-            )
-            if err != nil {
-                return err
-            }
-        }
-    }
-
-    // Commit the transaction
-    if err := tx.Commit(); err != nil {
-        return err
-    }
-
-    return nil
-}
-```
+This approach balances speed with courtesy to the target site.
 
 ## API Endpoints
 
-The backend provides the following API endpoints for website analysis:
+The API follows REST principles with JWT authentication:
 
-1. **POST /api/websites** - Create a new website for analysis
-2. **GET /api/websites/:id** - Get a specific website by ID
-3. **GET /api/websites** - Get all websites for the authenticated user
-4. **POST /api/websites/:id/start** - Start the analysis of a website
-5. **POST /api/websites/:id/stop** - Stop the analysis of a website
-6. **DELETE /api/websites/:id** - Delete a website
-7. **POST /api/websites/bulk/delete** - Delete multiple websites
-8. **POST /api/websites/bulk/start** - Start analysis for multiple websites
+### Auth Endpoints
+- `POST /api/auth/register` - Create a new user account
+- `POST /api/auth/login` - Get authentication token
 
-These endpoints are defined in the `api/routes.go` file and implemented in the `api/website_handlers.go` file.
+### Website Endpoints
+- `POST /api/websites` - Add a new website
+- `GET /api/websites` - List all websites with pagination
+- `GET /api/websites/:id` - Get detailed website analysis
+- `POST /api/websites/:id/start` - Begin website analysis
+- `POST /api/websites/:id/stop` - Cancel analysis
+- `DELETE /api/websites/:id` - Remove a website
+- `POST /api/websites/bulk-delete` - Remove multiple websites
+- `POST /api/websites/bulk-start` - Analyze multiple websites
+
+All website endpoints require authentication via the JWT middleware.
+
+## Performance Considerations
+
+Some optimization techniques I used:
+- **Goroutines** for non-blocking concurrent analysis
+- **Connection pooling** for database operations
+- **Rate limiting** to prevent abuse of the API
+- **Pagination** for large datasets
+- **Database indexes** on frequently queried fields

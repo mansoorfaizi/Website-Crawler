@@ -120,6 +120,18 @@ export const websiteAPI = {
   deleteWebsite: async (id: string): Promise<void> => {
     await api.delete(`/websites/${id}`);
   },
+  
+  bulkDeleteWebsites: async (ids: string[]): Promise<void> => {
+    // Convert string IDs to integers for the backend
+    const intIds = ids.map(id => parseInt(id, 10));
+    await api.post('/websites/bulk-delete', { ids: intIds });
+  },
+  
+  bulkStartAnalysis: async (ids: string[]): Promise<void> => {
+    // Convert string IDs to integers for the backend
+    const intIds = ids.map(id => parseInt(id, 10));
+    await api.post('/websites/bulk-start', { ids: intIds });
+  },
 };
 
 // Helper function to get HTTP status text

@@ -39,6 +39,13 @@ export function AddUrlDialog({
       return;
     }
     
+    // Check for trailing slash
+    if (value.endsWith('/')) {
+      setError('Please remove the trailing slash at the end of your URL');
+      setIsValid(false);
+      return;
+    }
+    
     try {
       new URL(value);
       // Check for http or https protocol
@@ -50,7 +57,7 @@ export function AddUrlDialog({
         setIsValid(false);
       }
     } catch {
-      setError('Please enter a valid URL');
+      setError('That doesn\'t look like a valid website address');
       setIsValid(false);
     }
   };

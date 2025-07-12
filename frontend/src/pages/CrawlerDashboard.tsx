@@ -155,8 +155,8 @@ export function CrawlerDashboard() {
     
     try {
       if (action === 'delete') {
-        // Delete each selected website
-        await Promise.all(selectedIds.map(id => websiteAPI.deleteWebsite(id)));
+        // Use bulk delete endpoint instead of deleting each website individually
+        await websiteAPI.bulkDeleteWebsites(selectedIds);
         
         // Remove deleted items from local state
         setResults(prev => prev.filter(result => !selectedIds.includes(result.id)));
@@ -166,8 +166,8 @@ export function CrawlerDashboard() {
           description: `Successfully deleted ${selectedIds.length} website(s)`
         });
       } else if (action === 'rerun') {
-        // Start analysis for each selected website
-        await Promise.all(selectedIds.map(id => websiteAPI.startAnalysis(id)));
+        // Use bulk start endpoint instead of starting each website individually
+        await websiteAPI.bulkStartAnalysis(selectedIds);
         
         // Update status in local state
         setResults(prev => prev.map(result => 
